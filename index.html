@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liked Song Alarm</title>
+  <meta name="description" content="A morning alarm that wakes you with a random song from your Spotify Liked Songs.">
+  <meta name="theme-color" content="#0f1115">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2214%22 fill=%22%231db954%22/%3E%3Cpath d=%22M16 8v8l5 3%22 stroke=%22%23fff%22 stroke-width=%223%22 fill=%22none%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">Liked Song Alarm</span>
+    <button id="logout" class="link" hidden>Log out</button>
+  </header>
+
+  <main>
+    <!-- Shown until the user connects Spotify -->
+    <section id="setup" class="card" hidden>
+      <h1>Wake up to your Liked Songs</h1>
+      <p class="muted">At the time you pick, this page plays a random song from your Spotify Liked Songs and keeps going with more random likes until you turn it off.</p>
+
+      <ol class="steps">
+        <li>Open the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a> and create an app. Tick <b>Web API</b> and <b>Web Playback SDK</b>.</li>
+        <li>Add this exact <b>Redirect URI</b> to the app's settings:
+          <div class="copyline"><code id="redirect-uri"></code><button id="copy-redirect" class="small">Copy</button></div>
+        </li>
+        <li>Paste the app's <b>Client ID</b> here:</li>
+      </ol>
+
+      <label class="field">
+        <span>Client ID</span>
+        <input id="client-id" autocomplete="off" spellcheck="false" placeholder="e.g. 3f1c0e…">
+      </label>
+      <button id="connect" class="primary wide">Connect Spotify</button>
+      <p class="muted small">Needs Spotify Premium. Your Client ID and login stay in this browser, and nothing is sent anywhere except Spotify.</p>
+    </section>
+
+    <!-- Main alarm UI -->
+    <section id="app" hidden>
+      <div class="clock" id="clock" aria-live="off">--:--</div>
+      <p class="next" id="next-alarm">No alarm set</p>
+
+      <div class="card">
+        <label class="field">
+          <span>Wake me at</span>
+          <input type="time" id="alarm-time" value="07:00" required>
+        </label>
+
+        <fieldset class="days" id="days">
+          <legend>Repeat on <span class="muted small">(none selected = every day)</span></legend>
+          <button type="button" data-day="1">M</button>
+          <button type="button" data-day="2">T</button>
+          <button type="button" data-day="3">W</button>
+          <button type="button" data-day="4">T</button>
+          <button type="button" data-day="5">F</button>
+          <button type="button" data-day="6">S</button>
+          <button type="button" data-day="0">S</button>
+        </fieldset>
+
+        <div class="grid">
+          <label class="field">
+            <span>Volume <output id="volume-out">70%</output></span>
+            <input type="range" id="volume" min="10" max="100" step="5" value="70">
+          </label>
+          <label class="field">
+            <span>Fade in</span>
+            <select id="fade">
+              <option value="0">Off</option>
+              <option value="30">30 seconds</option>
+              <option value="60" selected>1 minute</option>
+              <option value="120">2 minutes</option>
+              <option value="300">5 minutes</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Snooze</span>
+            <select id="snooze">
+              <option value="5">5 minutes</option>
+              <option value="9" selected>9 minutes</option>
+              <option value="10">10 minutes</option>
+              <option value="15">15 minutes</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="arm" class="primary wide">Set alarm</button>
+      </div>
+
+      <div class="card status">
+        <div><span class="muted">Account</span><span id="account">…</span></div>
+        <div><span class="muted">Liked songs</span><span id="liked-count">…</span></div>
+        <div><span class="muted">Player</span><span id="player-status">Starting…</span></div>
+      </div>
+
+      <div class="actions">
+        <button id="test">Test alarm now</button>
+      </div>
+
+      <p class="muted small hint">Leave this tab open and your device plugged in with sound on. While the alarm is set, the page keeps the screen awake where the browser allows it. If Spotify can't play here, the alarm tries your other Spotify devices, then falls back to a beep.</p>
+    </section>
+  </main>
+
+  <!-- Full-screen ringing view -->
+  <div id="ringing" class="ringing" hidden role="dialog" aria-modal="true" aria-labelledby="ring-title">
+    <div class="ring-inner">
+      <p class="ring-time" id="ring-clock"></p>
+      <img id="ring-art" alt="" width="280" height="280">
+      <h2 id="ring-title">Good morning</h2>
+      <p id="ring-artist" class="muted"></p>
+      <p id="ring-note" class="note" hidden></p>
+      <div class="ring-actions">
+        <button id="snooze-btn" class="big">Snooze</button>
+        <button id="another-btn">Different song</button>
+        <button id="stop-btn" class="primary big">I'm up</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Shown after a reload: browsers need a tap before a page may play sound -->
+  <button id="gesture-banner" class="banner" hidden>Tap here to turn the alarm's sound back on</button>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
