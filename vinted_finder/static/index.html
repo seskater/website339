@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vinted Finder</title>
+<style>
+  :root {
+    --bg: #f6f7f7; --card: #fff; --text: #1b1f1f; --muted: #6b7272;
+    --line: #dfe3e3; --accent: #007782; --accent-ink: #fff; --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121515; --card: #1b2020; --text: #e8eded; --muted: #9aa3a3;
+            --line: #2c3333; --accent: #3fb5c0; --accent-ink: #0b1414; --warn: #e0a54a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  form { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+         padding: 16px; display: grid; gap: 14px; }
+  label { display: grid; gap: 6px; font-weight: 600; font-size: 14px; }
+  label small { font-weight: 400; color: var(--muted); }
+  textarea, input, select { font: inherit; color: inherit; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%; }
+  textarea { resize: vertical; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  details[open] summary { margin-bottom: 10px; }
+  button { font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-ink);
+           border: 0; border-radius: 8px; padding: 11px 18px; cursor: pointer; justify-self: start; }
+  button:disabled { opacity: .6; cursor: progress; }
+  #status { color: var(--muted); margin: 18px 0 0; min-height: 1.4em; }
+  #status.err { color: var(--warn); }
+  .profile { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+             padding: 14px 16px; margin-top: 18px; }
+  .profile p { margin: 0 0 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 13px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 18px; }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+          display: flex; flex-direction: column; text-decoration: none; color: inherit; }
+  .item img { width: 100%; aspect-ratio: 3/4; object-fit: cover; background: var(--line); display: block; }
+  .item .body { padding: 10px 12px 12px; display: grid; gap: 4px; }
+  .item .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .price { font-weight: 700; }
+  .score { font-size: 12px; font-weight: 700; color: var(--accent); }
+  .title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .reason { font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Vinted Finder</h1>
+  <p class="sub">Tell it what you want; it learns your style from items you liked and finds the best current listings.</p>
+
+  <form id="f">
+    <label>What are you looking for?
+      <textarea name="prompt" rows="2" placeholder="e.g. a vintage leather jacket for autumn, size M, under 60€"></textarea>
+    </label>
+    <label>Items you liked <small>Paste Vinted item links, one per line.</small>
+      <textarea name="liked" rows="4" placeholder="https://www.vinted.fr/items/1234567890-..."></textarea>
+    </label>
+    <details>
+      <summary>Import all my likes automatically</summary>
+      <label>Vinted cookie <small>Log in to Vinted in your browser, open DevTools → Network, click any request to vinted, and copy the whole <code>Cookie</code> request header. It stays on this server and is only sent to Vinted.</small>
+        <textarea name="cookie" rows="2" placeholder="access_token_web=...; ..."></textarea>
+      </label>
+    </details>
+    <div class="row">
+      <label>Vinted site
+        <select name="domain">
+          <option>www.vinted.fr</option><option>www.vinted.co.uk</option><option>www.vinted.com</option>
+          <option>www.vinted.de</option><option>www.vinted.es</option><option>www.vinted.it</option>
+          <option>www.vinted.nl</option><option>www.vinted.be</option><option>www.vinted.pl</option>
+          <option>www.vinted.pt</option><option>www.vinted.at</option><option>www.vinted.lt</option>
+          <option>www.vinted.cz</option><option>www.vinted.sk</option><option>www.vinted.lu</option>
+        </select>
+      </label>
+      <label>Max price <input name="max_price" type="number" min="0" step="1" placeholder="any"></label>
+      <label>Results <input name="top_n" type="number" min="1" max="40" value="12"></label>
+    </div>
+    <button id="go" type="submit">Find items</button>
+  </form>
+
+  <p id="status" role="status"></p>
+  <div id="profile"></div>
+  <div id="results" class="grid"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const form = $("#f");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+try {
+  const saved = JSON.parse(localStorage.getItem("vf-form") || "{}");
+  for (const [k, v] of Object.entries(saved)) if (form.elements[k] && k !== "cookie") form.elements[k].value = v;
+} catch {}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const fd = new FormData(form);
+  const body = {
+    prompt: fd.get("prompt").trim(),
+    liked_urls: fd.get("liked").split(/\s+/).filter((u) => u.includes("/items/")),
+    cookie: fd.get("cookie").trim() || null,
+    domain: fd.get("domain"),
+    max_price: fd.get("max_price") ? Number(fd.get("max_price")) : null,
+    top_n: Number(fd.get("top_n") || 12),
+  };
+  try {
+    const { cookie, ...rest } = Object.fromEntries(fd);
+    localStorage.setItem("vf-form", JSON.stringify(rest));
+  } catch {}
+
+  $("#go").disabled = true;
+  $("#status").className = "";
+  $("#status").textContent = "Reading your likes, searching Vinted and ranking listings… (about a minute)";
+  $("#profile").innerHTML = ""; $("#results").innerHTML = "";
+  try {
+    const r = await fetch("/api/find", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || r.statusText);
+    render(data);
+  } catch (err) {
+    $("#status").className = "err";
+    $("#status").textContent = "Error: " + err.message;
+  } finally {
+    $("#go").disabled = false;
+  }
+});
+
+function render(d) {
+  $("#status").textContent = `Checked ${d.candidates_seen} listings using ${d.liked.length} liked item(s). Top ${d.results.length}:`
+    + (d.warnings.length ? "  ⚠ " + d.warnings.join(" · ") : "");
+  $("#profile").innerHTML = `<div class="profile"><p>${esc(d.taste_profile)}</p>
+    <div class="chips">${d.queries.map((q) => `<span class="chip">${esc(q.search_text)}${q.price_to ? " ≤ " + esc(q.price_to) : ""}</span>`).join("")}</div></div>`;
+  $("#results").innerHTML = d.results.map((it) => `
+    <a class="item" href="${esc(it.url)}" target="_blank" rel="noopener">
+      <img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      <div class="body">
+        <div class="top"><span class="price">${esc(it.price)} ${esc(it.currency)}</span><span class="score">${esc(it.score)}% match</span></div>
+        <div class="title">${esc(it.title)}</div>
+        <div class="meta">${esc([it.brand, it.details].filter(Boolean).join(" · "))}</div>
+        <div class="reason">${esc(it.reason)}</div>
+      </div>
+    </a>`).join("");
+}
+</script>
+</body>
+</html>
