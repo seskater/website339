@@ -34,6 +34,7 @@ class Item:
     currency: str = ""
     brand: str = ""
     details: str = ""  # e.g. "L · Très bon état"
+    size: str = ""  # e.g. "L", "M / 38 / 10", "EU 38", "11 ans / 146 cm"
     description: str = ""
     image: str = ""
     favourites: int = 0
@@ -88,6 +89,7 @@ def parse_catalog(page_html: str, base_url: str) -> list[Item]:
             currency=price.get("currencyCode", ""),
             brand=_clean(box.get("firstLine")),
             details=_clean(box.get("secondLine")),
+            size=_size_from_details(_clean(box.get("secondLine"))),
             image=obj.get("thumbnailUrl") or "",
             favourites=int(obj.get("favouriteCount") or 0),
         )
@@ -132,9 +134,16 @@ def parse_item_page(page_html: str, url: str) -> Item:
         currency=price.get("currency_code", ""),
         brand=brand,
         details=" · ".join(attrs[k] for k in ("size", "status", "color") if k in attrs),
+        size=attrs.get("size", "").replace("\xa0", " "),
         description=meta("og:description"),
         image=meta("og:image"),
     )
+
+
+def _size_from_details(details: str) -> str:
+    """The size is the first part of "<size> · <condition>"; items without a size show only the condition."""
+    parts = [p.strip() for p in details.replace("\xa0", " ").split("·")]
+    return parts[0] if len(parts) >= 2 else ""
 
 
 def _clean(v) -> str:
@@ -253,6 +262,7 @@ class VintedClient:
             currency=price.get("currency_code", ""),
             brand=raw.get("brand_title", "") or "",
             details=" · ".join(x for x in (raw.get("size_title"), raw.get("status")) if x),
+            size=raw.get("size_title", "") or "",
             image=photo.get("url", "") if isinstance(photo, dict) else "",
             favourites=int(raw.get("favourite_count") or 0),
         )

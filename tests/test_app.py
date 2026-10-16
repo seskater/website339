@@ -33,7 +33,7 @@ class FakeVinted:
     def item(self, url):
         return Item(id=1, title="Levi's 501", url=url, brand="Levi's")
 
-    def search(self, text, price_to=None):
+    def search(self, text, price_from=None, price_to=None):
         return [
             Item(id=2, title="Levi's 501 baggy", url="u2", brand="Levi's", price="20"),
             Item(id=3, title="Robe", url="u3", brand="Zara", price="5"),
@@ -51,7 +51,7 @@ def test_falls_back_to_free_mode_when_claude_fails(monkeypatch):
         raise err
 
     claude = types.SimpleNamespace(beta=types.SimpleNamespace(messages=types.SimpleNamespace(parse=parse)))
-    r = finder.find("baggy levis", ["https://www.vinted.fr/items/1"], claude=claude, vinted=FakeVinted(), log=lambda *_: None)
+    r = finder.find("baggy levis", ["https://www.vinted.fr/items/1"], mode="claude", claude=claude, vinted=FakeVinted(), log=lambda *_: None)
     assert r.mode == "keywords"
     assert r.picks[0][0].id == 2
     assert any("out of API credit" in w for w in r.warnings)

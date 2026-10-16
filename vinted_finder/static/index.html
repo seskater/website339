@@ -20,6 +20,18 @@
   h1 { font-size: 22px; margin: 0 0 4px; }
   .mode { display: inline-block; font-size: 13px; border: 1px solid var(--line); border-radius: 999px;
           padding: 2px 10px; margin: 4px 0 8px; color: var(--muted); }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; border: 0; padding: 0; margin: 0; }
+  .modes legend { font-weight: 600; font-size: 14px; margin-bottom: 6px; padding: 0; }
+  .modes label { display: block; cursor: pointer; font-weight: 400; }
+  .modes input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .modes .opt { display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; background: var(--bg); }
+  .modes .opt b { font-size: 14px; }
+  .modes .opt span { font-size: 12.5px; color: var(--muted); font-weight: 400; }
+  .modes input:checked + .opt { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .modes input:focus-visible + .opt { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .modes input:disabled + .opt { opacity: .55; cursor: not-allowed; }
+  .size { font-weight: 600; }
+  .size.match { color: var(--accent); }
   .sub { color: var(--muted); margin: 0 0 20px; }
   form { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
          padding: 16px; display: grid; gap: 14px; }
@@ -61,6 +73,12 @@
   <p class="sub">Tell it what you want; it learns your style from items you liked and finds the best current listings.</p>
 
   <form id="f">
+    <fieldset class="modes">
+      <legend>Matching</legend>
+      <label><input type="radio" name="mode" value="visual"><span class="opt"><b>Free · photos</b><span id="m-visual">Compares listing photos to your likes</span></span></label>
+      <label><input type="radio" name="mode" value="keywords"><span class="opt"><b>Free · tags</b><span>Matches brand, words and size tags</span></span></label>
+      <label><input type="radio" name="mode" value="claude"><span class="opt"><b>Paid · Claude API</b><span id="m-claude">Understands style and your request</span></span></label>
+    </fieldset>
     <label>What are you looking for?
       <textarea name="prompt" rows="2" placeholder="e.g. a vintage leather jacket for autumn, size M, under 60€"></textarea>
     </label>
@@ -83,6 +101,8 @@
           <option>www.vinted.cz</option><option>www.vinted.sk</option><option>www.vinted.lu</option>
         </select>
       </label>
+      <label>Sizes first <input name="sizes" type="text" placeholder="e.g. M, 38 (blank: from likes)"></label>
+      <label>Min price <input name="min_price" type="number" min="0" step="1" placeholder="any"></label>
       <label>Max price <input name="max_price" type="number" min="0" step="1" placeholder="any"></label>
       <label>Results <input name="top_n" type="number" min="1" max="40" value="12"></label>
     </div>
@@ -99,22 +119,26 @@ const $ = (s) => document.querySelector(s);
 const form = $("#f");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-const MODES = {
-  claude: "Ranked by Claude",
-  visual: "Free mode: matching by photo similarity",
-  keywords: "Free mode: keyword matching",
-};
-function showMode(mode, remaining, limit) {
+const MODE_NAMES = { claude: "Paid · Claude API", visual: "Free · photos", keywords: "Free · tags" };
+function showRemaining(remaining, limit) {
   const m = $("#mode");
-  m.textContent = (MODES[mode] || mode) + (limit ? ` · ${remaining}/${limit} searches left today` : "");
-  m.hidden = false;
+  m.textContent = `${remaining}/${limit} searches left today`;
+  m.hidden = !limit;
 }
-fetch("/api/health").then((r) => r.json()).then((h) => showMode(h.mode, h.remaining, h.daily_limit)).catch(() => {});
 
-try {
-  const saved = JSON.parse(localStorage.getItem("vf-form") || "{}");
-  for (const [k, v] of Object.entries(saved)) if (form.elements[k] && k !== "cookie") form.elements[k].value = v;
-} catch {}
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem("vf-form") || "{}"); } catch {}
+for (const [k, v] of Object.entries(saved)) if (form.elements[k] && k !== "cookie" && k !== "mode") form.elements[k].value = v;
+form.elements.mode.value = saved.mode || "visual";
+
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  showRemaining(h.remaining, h.daily_limit);
+  const radios = form.querySelectorAll('input[name="mode"]');
+  for (const r of radios) r.disabled = !h.modes[r.value];
+  if (!h.modes.claude) $("#m-claude").textContent = "Not set up yet (needs an API key)";
+  if (!h.modes.visual) $("#m-visual").textContent = "Not installed on this server";
+  if (!h.modes[form.elements.mode.value]) form.elements.mode.value = h.mode;
+}).catch(() => {});
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -124,6 +148,9 @@ form.addEventListener("submit", async (e) => {
     liked_urls: fd.get("liked").split(/\s+/).filter((u) => u.includes("/items/")),
     cookie: fd.get("cookie").trim() || null,
     domain: fd.get("domain"),
+    mode: fd.get("mode") || null,
+    sizes: fd.get("sizes").trim(),
+    min_price: fd.get("min_price") ? Number(fd.get("min_price")) : null,
     max_price: fd.get("max_price") ? Number(fd.get("max_price")) : null,
     top_n: Number(fd.get("top_n") || 12),
   };
@@ -149,19 +176,26 @@ form.addEventListener("submit", async (e) => {
   }
 });
 
+function priceRange(lo, hi) {
+  if (lo != null && hi != null) return ` · ${esc(lo)}–${esc(hi)}`;
+  if (hi != null) return ` · ≤ ${esc(hi)}`;
+  return lo != null ? ` · ≥ ${esc(lo)}` : "";
+}
+
 function render(d) {
-  showMode(d.mode, d.remaining, d.daily_limit);
-  $("#status").textContent = `Checked ${d.candidates_seen} listings using ${d.liked.length} liked item(s). Top ${d.results.length}:`
+  showRemaining(d.remaining, d.daily_limit);
+  $("#status").textContent = `${MODE_NAMES[d.mode] || d.mode}: checked ${d.candidates_seen} listings using ${d.liked.length} liked item(s)`
+    + (d.sizes.length ? `, size ${d.sizes.map((x) => x.toUpperCase()).join(", ")} first` : "") + `. Top ${d.results.length}:`
     + (d.warnings.length ? "  ⚠ " + d.warnings.join(" · ") : "");
   $("#profile").innerHTML = `<div class="profile"><p>${esc(d.taste_profile)}</p>
-    <div class="chips">${d.queries.map((q) => `<span class="chip">${esc(q.search_text)}${q.price_to ? " ≤ " + esc(q.price_to) : ""}</span>`).join("")}</div></div>`;
+    <div class="chips">${d.queries.map((q) => `<span class="chip">${esc(q.search_text)}${priceRange(d.min_price, q.price_to)}</span>`).join("")}</div></div>`;
   $("#results").innerHTML = d.results.map((it) => `
     <a class="item" href="${esc(it.url)}" target="_blank" rel="noopener">
       <img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">
       <div class="body">
         <div class="top"><span class="price">${esc(it.price)} ${esc(it.currency)}</span><span class="score">${esc(it.score)}% match</span></div>
         <div class="title">${esc(it.title)}</div>
-        <div class="meta">${esc([it.brand, it.details].filter(Boolean).join(" · "))}</div>
+        <div class="meta">${it.size ? `<span class="size${it.size_match ? " match" : ""}">${esc(it.size)}${it.size_match ? " ✓" : ""}</span> · ` : ""}${esc([it.brand, it.details.split(" · ").slice(it.size ? 1 : 0).join(" · ")].filter(Boolean).join(" · "))}</div>
         <div class="reason">${esc(it.reason)}</div>
       </div>
     </a>`).join("");

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import visual
-from .finder import default_claude, find
+from .finder import MODES, available_modes, default_mode, find
 from .vinted import VintedError
 
 STATIC = Path(__file__).parent / "static"
@@ -98,14 +98,11 @@ class FindRequest(BaseModel):
     liked_urls: list[str] = []
     cookie: str | None = None
     domain: str = "www.vinted.fr"
+    min_price: float | None = None
     max_price: float | None = None
+    sizes: str = ""
+    mode: str | None = None  # "claude" (paid, Claude API), "visual" or "keywords" (free)
     top_n: int = 12
-
-
-def _mode() -> str:
-    if default_claude():
-        return "claude"
-    return "visual" if visual.available() else "keywords"
 
 
 @app.get("/")
@@ -117,7 +114,8 @@ def index():
 def health(request: Request):
     return {
         "ok": True,
-        "mode": _mode(),
+        "mode": default_mode(),
+        "modes": available_modes(),
         "daily_limit": DAILY_LIMIT,
         "remaining": usage.remaining(visitor_id(request)),
     }
@@ -125,6 +123,8 @@ def health(request: Request):
 
 @app.post("/api/find")
 async def api_find(req: FindRequest, request: Request):
+    if req.mode is not None and req.mode not in MODES:
+        raise HTTPException(400, f"Unknown mode: {req.mode}")
     visitor = visitor_id(request)
     if not usage.take(visitor):
         raise HTTPException(
@@ -138,7 +138,10 @@ async def api_find(req: FindRequest, request: Request):
                 req.liked_urls[:50],
                 cookie=req.cookie or None,
                 domain=req.domain,
+                min_price=req.min_price,
                 max_price=req.max_price,
+                sizes=req.sizes[:100],
+                mode=req.mode,
                 top_n=max(1, min(req.top_n, 40)),
                 log=lambda *_: None,
             )

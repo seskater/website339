@@ -23,7 +23,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Your Vinted browser cookie, to import all your likes (or set VINTED_COOKIE)",
     )
     p.add_argument("--domain", default="www.vinted.fr", help="e.g. www.vinted.co.uk")
+    p.add_argument("--min-price", type=float)
     p.add_argument("--max-price", type=float)
+    p.add_argument("--size", default="", help='Sizes to show first, e.g. "M, 38"')
+    p.add_argument(
+        "--mode",
+        choices=["claude", "visual", "keywords"],
+        help="claude = paid (Claude API), visual = free photo matching, keywords = free tag matching",
+    )
     p.add_argument("--top", type=int, default=12)
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
     p.add_argument("--json", action="store_true", help="Print raw JSON")
@@ -40,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
         liked,
         cookie=args.cookie,
         domain=args.domain,
+        min_price=args.min_price,
         max_price=args.max_price,
+        sizes=args.size,
+        mode=args.mode,
         top_n=args.top,
         effort=args.effort,
         log=log,

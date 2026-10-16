@@ -92,6 +92,7 @@ def rank(
     candidates: list[Item],
     top_n: int = 12,
     effort: str = "medium",
+    sizes: list[str] | None = None,
 ) -> list[tuple[Item, Pick]]:
     if not candidates:
         return []
@@ -99,8 +100,9 @@ def rank(
     text = (
         "Pick the Vinted listings that best match this shopper.\n\n"
         f"Request: {prompt or '(more things like their likes)'}\n"
-        f"Taste profile: {plan.taste_profile}\n\n"
-        "Liked items:\n" + ("\n".join(i.summary() for i in liked) or "(none)") + "\n\n"
+        f"Taste profile: {plan.taste_profile}\n"
+        + (f"Wanted sizes: {', '.join(sizes)} (strongly prefer listings in these sizes)\n" if sizes else "")
+        + "\nLiked items:\n" + ("\n".join(i.summary() for i in liked) or "(none)") + "\n\n"
         "Candidate listings:\n" + "\n".join(c.summary() for c in candidates) + "\n\n"
         f"Return up to {top_n} picks, best first, using the ids in square brackets. "
         "Weigh fit to the request first, then fit to their taste, then value for money. "

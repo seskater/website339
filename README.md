@@ -7,14 +7,17 @@ Finds the best Vinted listings for you from two inputs: **items you liked** and 
 3. **Searches Vinted.** Runs them, removes duplicates and things you already liked.
 4. **Ranks** the listings and shows the top picks with a reason for each.
 
-Ranking runs in one of two modes, and the page shows which one is active:
+You pick the matching mode on the page (or with `--mode` on the command line):
 
-| Mode | When | Cost | Quality |
-|---|---|---|---|
-| **Claude** | `ANTHROPIC_API_KEY` is set | Haiku 5.5: under 1 cent per search (~500 searches for $5) | Best: reads photos, titles and your request |
-| **Free photo matching** | no key, or Claude fails (e.g. out of credit) | $0 | Good at "looks like what I liked"; rougher on the text request |
+| Mode | Cost | What it does |
+|---|---|---|
+| **Free · photos** (`visual`, default) | $0 | Compares listing photos to your liked items' photos with the open CLIP model, plus keywords. Good at "looks like what I liked". Downloads ~600 MB once. |
+| **Free · tags** (`keywords`) | $0 | Matches brands, words and size tags. Fastest, no download. |
+| **Paid · Claude API** (`claude`) | Haiku 5.5: under 1 cent per search | Claude reads photos, titles and your request. Best results. Shows as "not set up" until `ANTHROPIC_API_KEY` is set; if Claude fails mid-search (e.g. out of credit), that search falls back to a free mode. |
 
-Free mode uses the open CLIP image model on your CPU. It downloads once (~600 MB) on first start.
+**Sizes first:** type the sizes you want (e.g. `M, 38`). Listings tagged with one of those sizes are listed before everything else, best match first; other listings follow. Leave it blank to use the sizes of your liked items. Matching ignores prefixes, so `38` matches `EU 38` and `M / 38 / 10`.
+
+**Price range:** set a min and/or max price. Both are sent to Vinted's search and checked again on the results.
 
 ## Run it on your computer
 
@@ -36,7 +39,7 @@ If the link never appears, your network (VPN, school or work Wi-Fi) is probably 
 
 - Each visitor (by IP address) gets **20 searches per day**. Change it with `DAILY_LIMIT` in `.env`. Failed searches don't count.
 - At most 2 searches run at once; the rest wait.
-- For a hard cap on spending, set a monthly limit in the Anthropic Console (Settings → Limits). When credit runs out, the app switches to free photo matching on its own.
+- For a hard cap on spending, set a monthly limit in the Anthropic Console (Settings → Limits). When credit runs out, paid searches fall back to a free mode on their own.
 
 ## Getting an API key (optional)
 
@@ -73,7 +76,7 @@ python -m vinted_finder "a vintage leather jacket, size M, under 60€" \
   --liked https://www.vinted.fr/items/123-... --top 10
 ```
 
-Options: `--liked-file likes.txt`, `--cookie "..."` (or `VINTED_COOKIE`) to import all likes, `--domain www.vinted.co.uk`, `--max-price`, `--json`.
+Options: `--mode visual|keywords|claude`, `--size "M, 38"`, `--min-price`, `--max-price`, `--liked-file likes.txt`, `--cookie "..."` (or `VINTED_COOKIE`) to import all likes, `--domain www.vinted.co.uk`, `--json`.
 
 ### Importing all your likes with a cookie
 
