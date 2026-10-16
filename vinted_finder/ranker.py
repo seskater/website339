@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+
 import anthropic
 from pydantic import BaseModel, Field
 
 from .vinted import Item
 
-MODEL = "claude-opus-5-5"
+# Haiku keeps a search under a cent; set VINTED_FINDER_MODEL=claude-opus-5-5
+# for the most careful ranking (~$0.20-0.50 per search).
+MODEL = os.environ.get("VINTED_FINDER_MODEL", "claude-haiku-5-5")
 MAX_LIKED_IMAGES = 20
 
 
@@ -36,15 +40,18 @@ class Ranking(BaseModel):
 
 
 def _call(client: anthropic.Anthropic, content, output_format, effort: str):
+    extra = {}
+    if not MODEL.startswith("claude-haiku"):
+        # Re-runs a declined request on another model. Haiku has no server-side fallback.
+        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
     response = client.beta.messages.parse(
         model=MODEL,
         max_tokens=16000,
         thinking={"type": "adaptive"},
         output_config={"effort": effort},
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
         messages=[{"role": "user", "content": content}],
         output_format=output_format,
+        **extra,
     )
     if response.stop_reason == "refusal" or response.parsed_output is None:
         raise RuntimeError(f"Claude returned no result (stop_reason={response.stop_reason})")

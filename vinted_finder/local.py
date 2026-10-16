@@ -1,7 +1,7 @@
-"""Keyword-based planning and ranking, used when no Anthropic API key is set.
+"""Free planning and ranking, used when Claude isn't available.
 
-Much rougher than the Claude ranking (no photos, no understanding of style),
-but it lets the app run end to end without any credentials.
+Searches come from the prompt and liked brands; ranking blends keyword
+matches with CLIP photo similarity (see visual.py) when that is installed.
 """
 
 from __future__ import annotations
@@ -75,9 +75,7 @@ def plan_searches(liked: list[Item], prompt: str) -> SearchPlan:
         bits.append("recurring words in your likes: " + ", ".join(t for t, _ in liked_terms.most_common(5)))
     if price_to:
         bits.append(f"budget up to {price_to:g}")
-    profile = ("Keyword match (no Claude API key set): " + "; ".join(bits) + ".") if bits else (
-        "Keyword match (no Claude API key set)."
-    )
+    profile = ("Based on " + "; ".join(bits) + ".") if bits else "Based on your request."
     return SearchPlan(
         taste_profile=profile,
         queries=[Query(search_text=q, price_to=price_to) for q in queries],
@@ -85,39 +83,54 @@ def plan_searches(liked: list[Item], prompt: str) -> SearchPlan:
 
 
 def rank(
-    liked: list[Item], prompt: str, plan: SearchPlan, candidates: list[Item], top_n: int = 12
+    liked: list[Item],
+    prompt: str,
+    plan: SearchPlan,
+    candidates: list[Item],
+    top_n: int = 12,
+    visual: dict[int, tuple[float | None, float | None]] | None = None,
 ) -> list[tuple[Item, Pick]]:
+    """Score candidates on keywords, plus CLIP photo similarity when `visual` is given."""
     want = set(tokens(_PRICE.sub(" ", prompt)))
     liked_terms = Counter(t for i in liked for t in tokens(f"{i.title} {i.brand} {i.details}"))
     liked_brands = {_norm(i.brand) for i in liked if i.brand}
     price_to = budget(prompt)
+    visual = visual or {}
 
     scored = []
     for c in candidates:
         terms = set(tokens(f"{c.title} {c.brand} {c.details}"))
-        prompt_hits = len(want & terms) / len(want) if want else 0.0
-        taste_hits = sum(min(liked_terms[t], 3) for t in terms) / (3 * max(len(terms), 1))
-        brand_hit = 1.0 if c.brand and _norm(c.brand) in liked_brands else 0.0
-        score = (0.6 if want else 0.0) * prompt_hits + 0.25 * taste_hits + 0.15 * brand_hit
-        if not want:
-            score = score / 0.4
+        like_img, text_img = visual.get(c.id, (None, None))
+        # (weight, value) per signal; signals we can't compute are left out.
+        signals = [
+            (0.25, len(want & terms) / len(want) if want else None),
+            (0.10, sum(min(liked_terms[t], 3) for t in terms) / (3 * max(len(terms), 1)) if liked else None),
+            (0.10, (1.0 if c.brand and _norm(c.brand) in liked_brands else 0.0) if liked_brands else None),
+            (0.35, like_img),
+            (0.20, text_img),
+        ]
+        present = [(w, v) for w, v in signals if v is not None]
+        score = sum(w * v for w, v in present) / sum(w for w, _ in present) if present else 0.0
         try:
             if price_to and float(c.price) > price_to:
                 score *= 0.3
         except ValueError:
             pass
+
         reasons = []
+        if like_img is not None and like_img > 0.7:
+            reasons.append("looks like items you liked")
+        if text_img is not None and text_img > 0.7:
+            reasons.append("photo fits your request")
         if want & terms:
             reasons.append("matches " + ", ".join(sorted(want & terms)[:4]))
-        if brand_hit:
+        if c.brand and _norm(c.brand) in liked_brands:
             reasons.append(f"a brand you liked ({c.brand})")
-        if taste_hits > 0.2:
-            reasons.append("similar to your likes")
         scored.append((score, c, "; ".join(reasons) or "related listing"))
 
     scored.sort(key=lambda s: s[0], reverse=True)
     return [
-        (c, Pick(id=c.id, score=round(min(s, 1.0) * 100), reason=r.capitalize()))
+        (c, Pick(id=c.id, score=round(min(s, 1.0) * 100), reason=r[:1].upper() + r[1:]))
         for s, c, r in scored[:top_n]
         if s > 0
     ]

@@ -1,0 +1,8 @@
+.venv
+.models
+.tools
+.usage.json
+.env
+.git
+__pycache__
+tests

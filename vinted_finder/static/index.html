@@ -99,11 +99,17 @@ const $ = (s) => document.querySelector(s);
 const form = $("#f");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-fetch("/api/health").then((r) => r.json()).then((h) => {
+const MODES = {
+  claude: "Ranked by Claude",
+  visual: "Free mode: matching by photo similarity",
+  keywords: "Free mode: keyword matching",
+};
+function showMode(mode, remaining, limit) {
   const m = $("#mode");
-  m.textContent = h.mode === "claude" ? "Ranking with Claude" : "Basic keyword mode: set ANTHROPIC_API_KEY for Claude ranking";
+  m.textContent = (MODES[mode] || mode) + (limit ? ` · ${remaining}/${limit} searches left today` : "");
   m.hidden = false;
-}).catch(() => {});
+}
+fetch("/api/health").then((r) => r.json()).then((h) => showMode(h.mode, h.remaining, h.daily_limit)).catch(() => {});
 
 try {
   const saved = JSON.parse(localStorage.getItem("vf-form") || "{}");
@@ -144,6 +150,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 function render(d) {
+  showMode(d.mode, d.remaining, d.daily_limit);
   $("#status").textContent = `Checked ${d.candidates_seen} listings using ${d.liked.length} liked item(s). Top ${d.results.length}:`
     + (d.warnings.length ? "  ⚠ " + d.warnings.join(" · ") : "");
   $("#profile").innerHTML = `<div class="profile"><p>${esc(d.taste_profile)}</p>

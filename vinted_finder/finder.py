@@ -6,10 +6,11 @@ from dataclasses import dataclass
 
 import anthropic
 
-from . import local, ranker
+from . import local, ranker, visual
 from .vinted import Item, VintedClient, VintedError
 
 MAX_CANDIDATES = 250
+_LABEL = {"visual": "photo", "keywords": "keyword"}
 
 
 @dataclass
@@ -53,8 +54,16 @@ def find(
     if claude is None:
         claude = default_claude()
     warnings: list[str] = []
+    free_mode = "visual" if visual.available() else "keywords"
     if claude is None:
-        warnings.append("No ANTHROPIC_API_KEY set: using basic keyword matching instead of Claude.")
+        warnings.append(f"No ANTHROPIC_API_KEY set: using free {_LABEL[free_mode]} matching.")
+
+    def claude_failed(e: anthropic.APIError):
+        nonlocal claude
+        claude = None
+        warnings.append(
+            f"Claude unavailable ({_api_error(e)}): fell back to free {_LABEL[free_mode]} matching."
+        )
 
     liked: list[Item] = []
     if cookie:
@@ -76,10 +85,14 @@ def find(
         raise ValueError("Give at least a prompt or some liked items.")
     log(f"Using {len(liked)} liked item(s).")
 
+    plan = None
     if claude:
         log("Asking Claude what to search for...")
-        plan = ranker.plan_searches(claude, liked, prompt, effort=effort)
-    else:
+        try:
+            plan = ranker.plan_searches(claude, liked, prompt, effort=effort)
+        except anthropic.APIError as e:
+            claude_failed(e)
+    if plan is None:
         plan = local.plan_searches(liked, prompt)
     if not plan.queries:
         raise ValueError("Couldn't work out what to search for. Add a prompt.")
@@ -106,13 +119,37 @@ def find(
     pool_list = list(candidates.values())[:MAX_CANDIDATES]
     log(f"Ranking {len(pool_list)} listings...")
 
+    picks = None
     if claude:
-        picks = ranker.rank(claude, liked, prompt, plan, pool_list, top_n=top_n, effort=effort)
-    else:
-        picks = local.rank(liked, prompt, plan, pool_list, top_n=top_n)
-    return FindResult(
-        liked, plan, picks, len(candidates), warnings, "claude" if claude else "keywords"
-    )
+        try:
+            picks = ranker.rank(claude, liked, prompt, plan, pool_list, top_n=top_n, effort=effort)
+        except anthropic.APIError as e:
+            claude_failed(e)
+    mode = "claude"
+    if picks is None:
+        mode, scores = free_mode, None
+        if free_mode == "visual":
+            log("Comparing photos...")
+            scores = visual.scores(
+                [i.image for i in liked if i.image],
+                prompt,
+                {c.id: c.image for c in pool_list if c.image},
+            )
+        picks = local.rank(liked, prompt, plan, pool_list, top_n=top_n, visual=scores)
+    return FindResult(liked, plan, picks, len(candidates), warnings, mode)
+
+
+def _api_error(e: anthropic.APIError) -> str:
+    if isinstance(e, anthropic.AuthenticationError):
+        return "API key rejected"
+    if isinstance(e, anthropic.RateLimitError):
+        return "rate limited"
+    if isinstance(e, anthropic.APIStatusError):
+        msg = str(e.message) if e.message else ""
+        if "credit" in msg.lower() or "billing" in msg.lower():
+            return "out of API credit"
+        return f"HTTP {e.status_code}"
+    return "connection problem"
 
 
 def default_claude() -> anthropic.Anthropic | None:
