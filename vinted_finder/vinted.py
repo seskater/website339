@@ -12,6 +12,7 @@ import base64
 import html as html_lib
 import json
 import re
+import time
 from dataclasses import asdict, dataclass, field
 
 from curl_cffi import requests
@@ -140,26 +141,56 @@ def _clean(v) -> str:
     return v if isinstance(v, str) and not v.startswith("$") else ""
 
 
+_DOMAIN = re.compile(r"^www\.vinted\.(?:[a-z]{2,3}|co\.uk)$")
+# Cloudflare occasionally challenges a session; a fresh one with another
+# browser fingerprint usually gets through.
+_FINGERPRINTS = ("chrome", "safari", "chrome131")
+_RETRY_STATUS = {403, 429, 503}
+
+
 class VintedClient:
     def __init__(self, domain: str = "www.vinted.fr", cookie: str | None = None):
+        domain = domain.strip().lower()
         if not domain.startswith("www."):
             domain = "www." + domain
+        if not _DOMAIN.match(domain):
+            raise VintedError(f"Not a Vinted site: {domain}")
         self.base_url = f"https://{domain}"
-        self.session = requests.Session(impersonate="chrome")
-        self._warmed = False
         self.cookie = cookie.strip() if cookie else None
+        self._attempt = 0
+        self._new_session()
+
+    def _new_session(self):
+        fingerprint = _FINGERPRINTS[self._attempt % len(_FINGERPRINTS)]
+        self.session = requests.Session(impersonate=fingerprint)
+        self._warmed = False
 
     def _get(self, path_or_url: str, **params):
-        if not self._warmed:
-            # Picks up the anonymous session cookies Vinted expects.
-            self.session.get(self.base_url + "/", timeout=30)
-            self._warmed = True
         url = path_or_url if path_or_url.startswith("http") else self.base_url + path_or_url
+        if not url.startswith(self.base_url + "/"):
+            raise VintedError(f"URL is not on {self.base_url}: {url}")
         headers = {"Cookie": self.cookie} if self.cookie else None
-        r = self.session.get(url, params=params or None, headers=headers, timeout=30)
-        if r.status_code != 200:
-            raise VintedError(f"GET {url} -> HTTP {r.status_code}")
-        return r
+        status = None
+        for attempt in range(len(_FINGERPRINTS)):
+            if attempt:
+                time.sleep(1.5 * attempt)
+                self._attempt += 1
+                self._new_session()
+            try:
+                if not self._warmed:
+                    # Picks up the anonymous session cookies Vinted expects.
+                    self.session.get(self.base_url + "/", timeout=30)
+                    self._warmed = True
+                r = self.session.get(url, params=params or None, headers=headers, timeout=30)
+            except requests.RequestsError as e:
+                status = f"network error: {e}"
+                continue
+            if r.status_code == 200:
+                return r
+            status = f"HTTP {r.status_code}"
+            if r.status_code not in _RETRY_STATUS:
+                break
+        raise VintedError(f"GET {url} -> {status}")
 
     def search(
         self,
@@ -178,8 +209,11 @@ class VintedClient:
         return parse_catalog(self._get("/catalog", **params).text, self.base_url)
 
     def item(self, url: str) -> Item:
+        url = url.strip()
         if not url.startswith("http"):
             url = self.base_url + "/" + url.lstrip("/")
+        # A link from another Vinted country: read it through the chosen site.
+        url = re.sub(r"^https?://(?:www\.)?vinted\.[a-z.]+(?=/)", self.base_url, url)
         return parse_item_page(self._get(url).text, url)
 
     def favourites(self) -> list[Item]:

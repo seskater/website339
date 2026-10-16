@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import anthropic
 
-from . import ranker
+from . import local, ranker
 from .vinted import Item, VintedClient, VintedError
 
 MAX_CANDIDATES = 250
@@ -19,9 +19,11 @@ class FindResult:
     picks: list[tuple[Item, ranker.Pick]]
     candidates_seen: int
     warnings: list[str]
+    mode: str = "claude"
 
     def to_dict(self) -> dict:
         return {
+            "mode": self.mode,
             "liked": [i.to_dict() for i in self.liked],
             "taste_profile": self.plan.taste_profile,
             "queries": [q.model_dump() for q in self.plan.queries],
@@ -48,8 +50,11 @@ def find(
     log=print,
 ) -> FindResult:
     vinted = vinted or VintedClient(domain=domain, cookie=cookie)
-    claude = claude or anthropic.Anthropic()
+    if claude is None:
+        claude = default_claude()
     warnings: list[str] = []
+    if claude is None:
+        warnings.append("No ANTHROPIC_API_KEY set: using basic keyword matching instead of Claude.")
 
     liked: list[Item] = []
     if cookie:
@@ -71,8 +76,13 @@ def find(
         raise ValueError("Give at least a prompt or some liked items.")
     log(f"Using {len(liked)} liked item(s).")
 
-    log("Asking Claude what to search for...")
-    plan = ranker.plan_searches(claude, liked, prompt, effort=effort)
+    if claude:
+        log("Asking Claude what to search for...")
+        plan = ranker.plan_searches(claude, liked, prompt, effort=effort)
+    else:
+        plan = local.plan_searches(liked, prompt)
+    if not plan.queries:
+        raise ValueError("Couldn't work out what to search for. Add a prompt.")
     for q in plan.queries:
         q.price_to = _min(q.price_to, max_price)
     log("Searches: " + "; ".join(q.search_text for q in plan.queries))
@@ -96,8 +106,21 @@ def find(
     pool_list = list(candidates.values())[:MAX_CANDIDATES]
     log(f"Ranking {len(pool_list)} listings...")
 
-    picks = ranker.rank(claude, liked, prompt, plan, pool_list, top_n=top_n, effort=effort)
-    return FindResult(liked, plan, picks, len(candidates), warnings)
+    if claude:
+        picks = ranker.rank(claude, liked, prompt, plan, pool_list, top_n=top_n, effort=effort)
+    else:
+        picks = local.rank(liked, prompt, plan, pool_list, top_n=top_n)
+    return FindResult(
+        liked, plan, picks, len(candidates), warnings, "claude" if claude else "keywords"
+    )
+
+
+def default_claude() -> anthropic.Anthropic | None:
+    """A Claude client if credentials are configured, else None."""
+    client = anthropic.Anthropic()
+    if client.api_key or client.auth_token or getattr(client, "credentials", None):
+        return client
+    return None
 
 
 def _min(a: float | None, b: float | None) -> float | None:

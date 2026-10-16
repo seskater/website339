@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from .finder import find
+from .finder import default_claude, find
 from .vinted import VintedError
 
 app = FastAPI(title="Vinted Finder")
@@ -31,6 +31,11 @@ def index():
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/api/health")
+def health():
+    return {"ok": True, "mode": "claude" if default_claude() else "keywords"}
+
+
 @app.post("/api/find")
 async def api_find(req: FindRequest):
     try:
@@ -47,9 +52,11 @@ async def api_find(req: FindRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
     except VintedError as e:
+        if str(e).startswith("Not a Vinted site"):
+            raise HTTPException(400, str(e))
         raise HTTPException(502, f"Vinted: {e}")
     except anthropic.AuthenticationError:
-        raise HTTPException(500, "Set ANTHROPIC_API_KEY before starting the server.")
+        raise HTTPException(500, "Your ANTHROPIC_API_KEY was rejected. Check it and restart the server.")
     except anthropic.APIError as e:
         raise HTTPException(502, f"Claude API error: {e}")
     return result.to_dict()

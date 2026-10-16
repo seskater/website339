@@ -18,6 +18,8 @@
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
+  .mode { display: inline-block; font-size: 13px; border: 1px solid var(--line); border-radius: 999px;
+          padding: 2px 10px; margin: 4px 0 8px; color: var(--muted); }
   .sub { color: var(--muted); margin: 0 0 20px; }
   form { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
          padding: 16px; display: grid; gap: 14px; }
@@ -55,6 +57,7 @@
 <body>
 <main>
   <h1>Vinted Finder</h1>
+  <p id="mode" class="mode" hidden></p>
   <p class="sub">Tell it what you want; it learns your style from items you liked and finds the best current listings.</p>
 
   <form id="f">
@@ -95,6 +98,12 @@
 const $ = (s) => document.querySelector(s);
 const form = $("#f");
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  const m = $("#mode");
+  m.textContent = h.mode === "claude" ? "Ranking with Claude" : "Basic keyword mode: set ANTHROPIC_API_KEY for Claude ranking";
+  m.hidden = false;
+}).catch(() => {});
 
 try {
   const saved = JSON.parse(localStorage.getItem("vf-form") || "{}");
