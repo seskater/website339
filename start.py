@@ -46,17 +46,78 @@ def load_env():
                 os.environ[key.strip()] = value
 
 
+# Free photo matching needs onnxruntime, which only publishes builds for
+# Python 3.10-3.14 so far. The app itself runs on newer versions too.
+PHOTO_PY = ((3, 10), (3, 14))
+
+
+def _version(cmd: list[str]) -> tuple[int, int] | None:
+    try:
+        out = subprocess.run(
+            [*cmd, "-c", "import sys; print(*sys.version_info[:2])"],
+            capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+        )
+        major, minor = out.stdout.split()
+        return int(major), int(minor)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _photo_ok(v) -> bool:
+    return v is not None and PHOTO_PY[0] <= v <= PHOTO_PY[1]
+
+
+def find_python() -> list[str]:
+    """Prefer a Python that can run photo matching; fall back to this one."""
+    if _photo_ok(sys.version_info[:2]):
+        return [sys.executable]
+    if os.name == "nt":
+        candidates = [["py", f"-3.{m}"] for m in range(14, 9, -1)]
+    else:
+        candidates = [[f"python3.{m}"] for m in range(14, 9, -1)]
+    for cmd in candidates:
+        if (os.name == "nt" or shutil.which(cmd[0])) and _photo_ok(_version(cmd)):
+            return cmd
+    return [sys.executable]
+
+
 def install():
+    if PY.exists() and not _photo_ok(_version([str(PY)])):
+        better = find_python()
+        if better != [sys.executable] or _photo_ok(sys.version_info[:2]):
+            print("Recreating the virtual environment with a Python that supports photo matching...")
+            shutil.rmtree(VENV)
     if not PY.exists():
-        print("Creating virtual environment...")
-        venv.create(VENV, with_pip=True)
+        python = find_python()
+        v = _version(python)
+        print(f"Creating virtual environment (Python {v[0]}.{v[1]})..." if v else "Creating virtual environment...")
+        if python == [sys.executable]:
+            venv.create(VENV, with_pip=True)
+        else:
+            subprocess.check_call([*python, "-m", "venv", str(VENV)])
+
     stamp = VENV / ".installed"
-    req = ROOT / "requirements.txt"
-    if not stamp.exists() or req.stat().st_mtime > stamp.stat().st_mtime:
-        print("Installing dependencies (first run takes a couple of minutes)...")
-        subprocess.check_call([str(PY), "-m", "pip", "install", "-q", "--upgrade", "pip"])
-        subprocess.check_call([str(PY), "-m", "pip", "install", "-q", "-r", str(req)])
-        stamp.touch()
+    reqs = [ROOT / "requirements.txt", ROOT / "requirements-photo.txt"]
+    if stamp.exists() and all(r.stat().st_mtime <= stamp.stat().st_mtime for r in reqs):
+        return
+    print("Installing dependencies (first run takes a couple of minutes)...")
+    subprocess.check_call([str(PY), "-m", "pip", "install", "-q", "--upgrade", "pip"])
+    subprocess.check_call([str(PY), "-m", "pip", "install", "-q", "-r", str(reqs[0])])
+    print("Installing free photo matching...")
+    photo = subprocess.call([str(PY), "-m", "pip", "install", "-q", "-r", str(reqs[1])])
+    if photo != 0:
+        v = _version([str(PY)])
+        if _photo_ok(v):
+            hint = "Check the pip error above, then run start.py again."
+        else:
+            how = "run: py install 3.13" if os.name == "nt" else "from python.org"
+            hint = f"To enable it, install Python 3.13 ({how}), then run start.py again."
+        print(
+            "\n[!] Free photo matching couldn't be installed"
+            + (f" on Python {v[0]}.{v[1]}" if v else "")
+            + ". The app still works, using keyword matching.\n    " + hint + "\n"
+        )
+    stamp.touch()
 
 
 def cloudflared() -> str:
@@ -149,7 +210,11 @@ def main():
         model = os.environ.get("VINTED_FINDER_MODEL", "claude-haiku-5-5")
         print(f"Claude ranking on ({model}); free photo matching if it's unavailable.")
     else:
-        print("No ANTHROPIC_API_KEY in .env: using free photo matching.")
+        has_photo = subprocess.call(
+            [str(PY), "-c", "import fastembed, numpy, PIL"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ) == 0
+        print(f"No ANTHROPIC_API_KEY in .env: using free {'photo' if has_photo else 'keyword'} matching.")
     print(f"Daily limit: {os.environ.get('DAILY_LIMIT', '20')} searches per visitor.")
 
     server = subprocess.Popen(

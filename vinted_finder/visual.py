@@ -13,7 +13,10 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 
-import numpy as np
+try:
+    import numpy as np
+except ImportError:  # photo matching is optional (requirements-photo.txt)
+    np = None
 
 IMAGE_MODEL = "Qdrant/clip-ViT-B-32-vision"
 TEXT_MODEL = "Qdrant/clip-ViT-B-32-text"
@@ -28,6 +31,8 @@ _CACHE_MAX = 20000
 
 
 def available() -> bool:
+    if np is None:
+        return False
     try:
         import fastembed  # noqa: F401
         import PIL  # noqa: F401

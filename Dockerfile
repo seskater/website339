@@ -3,8 +3,8 @@ FROM python:3.12-slim
 
 RUN useradd -m -u 1000 app
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-photo.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-photo.txt
 
 COPY --chown=app . .
 RUN chown app /app

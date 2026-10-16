@@ -18,7 +18,7 @@ Free mode uses the open CLIP image model on your CPU. It downloads once (~600 MB
 
 ## Run it on your computer
 
-You need Python 3.10+ (python.org).
+You need Python 3.10+ (python.org). Free photo matching needs Python 3.10–3.14, because its `onnxruntime` dependency doesn't support 3.15 yet. On a newer Python the app still runs, using keyword matching. To get photo matching, install 3.13 alongside it (`py install 3.13` on Windows). `start.py` finds it and uses it automatically.
 
 ```bash
 cp .env.example .env        # optional: add your Anthropic API key

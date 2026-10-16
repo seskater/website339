@@ -1,0 +1,5 @@
+# Optional: free photo matching (CLIP via ONNX, CPU only).
+# onnxruntime currently ships for Python 3.10-3.14.
+fastembed>=0.9
+numpy>=1.26
+pillow>=10
