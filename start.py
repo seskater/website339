@@ -205,6 +205,14 @@ def main():
     os.chdir(ROOT)
     load_env()
     install()
+    # The photo model downloads from Hugging Face; its warnings (symlinks on
+    # Windows, no HF_TOKEN) are harmless and drown out the tester link.
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+    os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
+    if not (ROOT / ".models").exists():
+        print("First start: downloading the free photo model (~600 MB) in the background.")
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         model = os.environ.get("VINTED_FINDER_MODEL", "claude-haiku-5-5")
